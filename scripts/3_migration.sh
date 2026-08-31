@@ -9,7 +9,7 @@ set -o pipefail
 ############################################
 # CLI args
 ############################################
-MAX_CONCURRENT=5
+MAX_CONCURRENT=10
 CSV_PATH="repos.csv"
 OUTPUT_PATH="" # empty -> timestamped file
 
@@ -35,9 +35,9 @@ if [[ -z "${MAX_CONCURRENT}" || ! "${MAX_CONCURRENT}" =~ ^[0-9]+$ ]]; then
   echo -e "\033[31m[ERROR] --max-concurrent must be an integer\033[0m"; exit 1
 fi
 
-if [[ "${MAX_CONCURRENT}" -gt 5 ]]; then
-  echo -e "\033[31m[ERROR] Maximum concurrent migrations (${MAX_CONCURRENT}) exceeds the allowed limit of 5.\033[0m"
-  echo -e "\033[31m[ERROR] Please set --max-concurrent to 5 or less.\033[0m"
+if [[ "${MAX_CONCURRENT}" -gt 10 ]]; then
+  echo -e "\033[31m[ERROR] Maximum concurrent migrations (${MAX_CONCURRENT}) exceeds the allowed limit of 10.\033[0m"
+  echo -e "\033[31m[ERROR] Please set --max-concurrent to 10 or less.\033[0m"
   exit 1
 fi
 
@@ -378,7 +378,26 @@ total_repos=$(( $(wc -l < "${CSV_PATH}") - 1 ))
 echo "[SUMMARY] Total: ${total_repos} Migrated: ${#MIGRATED[@]} Failed: ${#FAILED[@]}"
 echo "[INFO] Wrote migration results with Migration_Status column: ${OUTPUT_CSV_PATH}"
 
-# Do not exit non-zero; let the workflow decide
-if (( ${#FAILED[@]} > 0 )); then
-  echo -e "\033[33m[WARNING] Migration completed with ${#FAILED[@]} failures\033[0m"
+############################################
+# 3-way exit code + GitHub Actions annotations
+############################################
+if (( ${#FAILED[@]} == 0 )); then
+  echo "::notice::All ${total_repos} repositories migrated successfully"
+  exit 0
+
+elif (( ${#MIGRATED[@]} == 0 )); then
+  echo "::error::All ${total_repos} repositories failed to migrate"
+  for item in "${FAILED[@]}"; do
+    IFS=$'\t' read -r pk _pn rs gh_org gh_repo _vis <<< "${item}"
+    echo "::error::Failed: ${gh_org}/${gh_repo} (${pk}/${rs})"
+  done
+  exit 1
+
+else
+  echo "::warning::Migration completed with partial success: ${#MIGRATED[@]} succeeded, ${#FAILED[@]} failed out of ${total_repos} total"
+  for item in "${FAILED[@]}"; do
+    IFS=$'\t' read -r pk _pn rs gh_org gh_repo _vis <<< "${item}"
+    echo "::warning::Failed: ${gh_org}/${gh_repo} (${pk}/${rs})"
+  done
+  exit 0
 fi
