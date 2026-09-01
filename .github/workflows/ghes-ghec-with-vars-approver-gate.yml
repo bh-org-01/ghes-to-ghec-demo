@@ -18,11 +18,11 @@ on:
         type: string
 
       max_concurrent:
-        description: "Maximum concurrent migrations (1-10)"
+        description: "Maximum concurrent migrations (1-5)"
         required: false
-        default: "10"
+        default: "5"
         type: choice
-        options: ["1","2","3","4","5","6","7","8","9","10"]
+        options: ["1","2","3","4","5"]
 
       # Stage toggles
       run_pre_validation:
@@ -75,7 +75,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install prerequisites (GitHub-hosted only)
         if: ${{ inputs.runner == 'ubuntu-latest' }}
@@ -87,105 +87,19 @@ jobs:
           gh --version
           jq --version
           python3 --version
-      - name: Validate GH_PAT & GH_SOURCE_PAT
-        id: validate_pats
-        shell: bash
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          GH_SOURCE_PAT: ${{ secrets.GH_SOURCE_PAT }}
-          GHES_API_URL: ${{ secrets.GHES_API_URL }}
-        run: |
-          set -uo pipefail
-      
-          GHEC_OK=false
-          GHES_OK=false
-      
-          GHEC_USER="N/A"
-          GHES_USER="N/A"
-      
-          echo "=================================================="
-          echo "Validating GHEC PAT (GH_PAT)"
-          echo "=================================================="
-      
-          GHEC_STATUS=$(curl -s \
-            -o /tmp/ghec_resp.json \
-            -w "%{http_code}" \
-            -H "Authorization: token ${GH_PAT}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/user)
-      
-          if [[ "${GHEC_STATUS}" == "200" ]]; then
-            GHEC_USER=$(jq -r '.login // "unknown"' /tmp/ghec_resp.json)
-            echo "✅ GH_PAT valid"
-            echo "Authenticated User: ${GHEC_USER}"
-            GHEC_OK=true
-          else
-            echo "❌ GH_PAT validation failed"
-            cat /tmp/ghec_resp.json || true
-          fi
-      
-          echo ""
-          echo "=================================================="
-          echo "Validating GHES PAT (GH_SOURCE_PAT)"
-          echo "=================================================="
-      
-          GHES_STATUS=$(curl -sk \
-            -o /tmp/ghes_resp.json \
-            -w "%{http_code}" \
-            -H "Authorization: token ${GH_SOURCE_PAT}" \
-            -H "Accept: application/vnd.github+json" \
-            "${GHES_API_URL}/user")
-      
-          if [[ "${GHES_STATUS}" == "200" ]]; then
-            GHES_USER=$(jq -r '.login // "unknown"' /tmp/ghes_resp.json)
-            echo "✅ GH_SOURCE_PAT valid"
-            echo "Authenticated User: ${GHES_USER}"
-            GHES_OK=true
-          else
-            echo "❌ GH_SOURCE_PAT validation failed"
-            cat /tmp/ghes_resp.json || true
-          fi
-      
-          echo "gh_pat_valid=${GHEC_OK}" >> "$GITHUB_OUTPUT"
-          echo "gh_source_pat_valid=${GHES_OK}" >> "$GITHUB_OUTPUT"
-      
-          echo "gh_pat_user=${GHEC_USER}" >> "$GITHUB_OUTPUT"
-          echo "gh_source_pat_user=${GHES_USER}" >> "$GITHUB_OUTPUT"
-      
-          echo ""
-          echo "=================================================="
-          echo "Validation Summary"
-          echo "=================================================="
-          echo "GH_PAT Valid          : ${GHEC_OK}"
-          echo "GH_PAT User           : ${GHEC_USER}"
-          echo "GH_SOURCE_PAT Valid   : ${GHES_OK}"
-          echo "GH_SOURCE_PAT User    : ${GHES_USER}"
-          echo "=================================================="
-      
-          if [[ "${GHEC_OK}" != "true" || "${GHES_OK}" != "true" ]]; then
-            echo "❌ One or more PAT validations failed."
-            exit 1
-          fi
-      
-          echo "✅ GH_PAT & GH_SOURCE_PAT validation successful."
-          
+
       - name: Install/Update GEI extension
-        if: steps.validate_pats.outputs.gh_pat_valid == 'true' && steps.validate_pats.outputs.gh_source_pat_valid == 'true'
         shell: bash
         run: |
           set -euo pipefail
-      
           if [[ -z "$GH_TARGET_HOST" ]]; then
               echo "$GH_PAT" | gh auth login --with-token
           else
               echo "$GH_PAT" | gh auth login --hostname "$GH_TARGET_HOST" --with-token
           fi
-      
           gh auth status
-      
           gh extension install https://github.com/github/gh-gei
           # gh extension upgrade https://github.com/github/gh-gei
-      
           gh gei --help >/dev/null
 
       - name: Make scripts executable
@@ -302,7 +216,7 @@ jobs:
 
       - name: Upload precheck artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: stage1-precheck-${{ github.run_id }}
           path: |
@@ -325,7 +239,7 @@ jobs:
           || needs.pre-migration-validation.result == 'skipped') }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install prerequisites (GitHub-hosted only)
         if: ${{ inputs.runner == 'ubuntu-latest' }}
@@ -451,7 +365,7 @@ jobs:
 
       - name: Upload migration artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: stage2-migration-${{ github.run_id }}
           path: |
@@ -469,12 +383,13 @@ jobs:
     runs-on: ${{ inputs.runner == 'ubuntu-latest' && 'ubuntu-latest' || fromJson(inputs.runner) }}
     timeout-minutes: 180
     needs: [migration]
-    if: ${{ always() 
-      && inputs.run_post_validation == 'true' 
-      && needs.migration.result == 'success' }} 
+    if: ${{ always()
+      && inputs.run_post_validation == 'true'
+      && (needs.migration.result == 'success'
+          || needs.migration.result == 'skipped') }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install prerequisites (GitHub-hosted only)
         if: ${{ inputs.runner == 'ubuntu-latest' }}
@@ -618,7 +533,7 @@ jobs:
 
       - name: Upload post-validation artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: stage3-postvalidation-${{ github.run_id }}
           path: |
@@ -642,7 +557,7 @@ jobs:
       && needs.post-migration-validation.result == 'success' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install prerequisites (GitHub-hosted only)
         if: ${{ inputs.runner == 'ubuntu-latest' }}
@@ -750,7 +665,7 @@ jobs:
 
       - name: Upload vars migration artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: stage4-vars-migration-${{ github.run_id }}
           path: |
