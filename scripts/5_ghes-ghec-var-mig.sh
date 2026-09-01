@@ -172,6 +172,24 @@ sync_environment_data() {
   local env_name="$3"
   local env_enc
   env_enc="$(urlencode "$env_name")"
+
+  # ----------------------------------------------------------
+  # CREATE TARGET ENVIRONMENT
+  # ----------------------------------------------------------
+  log_info "Creating environment: $env_name"
+
+  if api_target \
+    "create environment: $tgt_full / $env_name" \
+    -X PUT \
+    "/repos/$tgt_full/environments/$env_enc" \
+    >/dev/null; then
+
+    log_success "Environment created/validated: $env_name"
+
+  else
+    log_warn "Failed to create environment: $env_name"
+    return 1
+  fi
   local repo_env_rules_synced=0
   local repo_env_vars_synced=0
 
@@ -309,8 +327,8 @@ main() {
         continue
     fi
     if [[ "$migration_status" != "Success" ]]; then
-        log_warn "Skipping $s_org/$s_repo because migration status is $migration_status"
-        SKIPPED_REPOS=$((SKIPPED_REPOS + 1))
+        log_error "Skipping $s_org/$s_repo because repository migration status is $migration_status"
+        FAILED_REPOS=$((FAILED_REPOS + 1))
         continue
     fi
     [[ -z "$s_org" ]] && continue
@@ -428,7 +446,7 @@ main() {
     # --------------------------------------------------------
     # 3. ENVIRONMENTS
     # --------------------------------------------------------
-    log_info "Syncing Environments"
+    log_info "Syncing Environments (Environment creation + Variables only)"
 
     envs="$(
       api_source \
